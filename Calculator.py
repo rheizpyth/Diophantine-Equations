@@ -19,37 +19,73 @@ def expr(c1, x1, c2, x2):
     return s
 
 
-def back_substitute(steps):
+def _term(c, n, first):
+    """One term. A leading coefficient of 1 is written bare, like  3 - 1(2)."""
+    if first:
+        return f"{n}" if c == 1 else f"{c}({n})"
+    sign = "+" if c >= 0 else "-"
+    return f" {sign} {abs(c)}({n})"
+
+
+def _bracket(c, ai, qi, bi, first):
+    """The substituted remainder, written as  c[ai - qi(bi)]."""
+    inner = f"{ai} - {qi}({bi})"
+    if first:
+        return f"[{inner}]" if c == 1 else f"{c}[{inner}]"
+    sign = "+" if c >= 0 else "-"
+    return f" {sign} {abs(c)}[{inner}]"
+
+
+def _render(terms):
+    return "".join(_term(c, n, i == 0) for i, (c, n) in enumerate(terms))
+
+
+def back_substitute(steps, g):
     """
-    Back-substitute through the Euclid steps.
-    Returns (lines, u, v) such that gcd = u*a0 + v*b0.
+    Back-substitution written the way it is done by hand:
+      substitute the remainder -> distribute -> combine like terms.
+    Returns (lines, u, v) such that g = u*a0 + v*b0.
     """
     n = len(steps)
-    lines = []
 
     if n == 1:  # b divides a exactly
         a, q, b, r = steps[0]
-        lines.append(f"{b} divides {a} exactly, so gcd = {b} = 0({a}) + 1({b})")
-        return lines, 0, 1
+        return [f"{g} = 0({a}) + 1({b})   ({b} divides {a} exactly)"], 0, 1
 
     # last equation with a non-zero remainder:  g = a - q(b)
     a, q, b, r = steps[n - 2]
-    cA, cB = 1, -q
-    lines.append(f"{r} = {a} - {q}({b})")
+    terms = [(1, a), (-q, b)]
+    k = 1  # index of the term (a remainder) that gets replaced next
+    lines = [f"{g} = {_render(terms)}"]
 
-    # substitute upward
     for i in range(n - 3, -1, -1):
         ai, qi, bi, ri = steps[i]
-        # current expression: cA*(bi) + cB*(ri), and ri = ai - qi*bi
-        lines.append(
-            f"   = {cA}({bi}) + ({cB})[{ai} - {qi}({bi})]      (replace {ri})"
-        )
-        newA = cB
-        newB = cA - cB * qi
-        lines.append(f"   = {expr(newA, ai, newB, bi)}")
-        cA, cB = newA, newB
+        c = terms[k][0]
+        other = terms[1 - k][0]
 
-    return lines, cA, cB
+        # 1) replace the remainder ri by  ai - qi(bi)
+        parts = []
+        for idx, (cc, nn) in enumerate(terms):
+            if idx == k:
+                parts.append(_bracket(cc, ai, qi, bi, idx == 0))
+            else:
+                parts.append(_term(cc, nn, idx == 0))
+        lines.append(f"{g} = {''.join(parts)}")
+
+        # 2) distribute
+        terms = terms[:k] + [(c, ai), (-c * qi, bi)] + terms[k + 1:]
+        lines.append(f"{g} = {_render(terms)}")
+
+        # 3) combine like terms
+        coef_bi = other - c * qi
+        if i > 0:
+            terms = [(coef_bi, bi), (c, ai)]
+            k = 0
+        else:
+            terms = [(c, ai), (coef_bi, bi)]
+        lines.append(f"{g} = {_render(terms)}")
+
+    return lines, terms[0][0], terms[1][0]
 
 
 # -------------------------------------------------------------------- app
@@ -99,16 +135,14 @@ st.code("\n".join(f"{x} = {q}({y}) + {r}" for x, q, y, r in steps4))
 st.success(f"gcd({a1}, {b1}) = {g4}")
 
 # ---------------------------------------------------------------- STEP 5
-st.header("Step 5: Back-substitute to simplify")
-lines, u, v = back_substitute(steps4)
-st.code("\n".join(lines))
-
+st.header("Step 5: Now back to simplify")
+lines, u, v = back_substitute(steps4, g4)
 A, B = abs(a1), abs(b1)
-st.write(f"So:  1 = {expr(u, A, v, B)}")
-assert u * A + v * B == 1
+assert u * A + v * B == g4
 
-st.write(f"Multiply both sides by {c1}:")
-st.code(f"{c1}  =  {u * c1}({A}) + ({v * c1})({B})")
+lines.append(f"[{g4} = {expr(u, A, v, B)}] {c1}")
+lines.append(f"= {expr(u * c1, A, v * c1, B)}")
+st.code("\n".join(lines))
 
 # fix signs if a or b were negative
 sa = 1 if a1 > 0 else -1
@@ -117,7 +151,7 @@ x0, y0 = u * c1 * sa, v * c1 * sb
 if sa < 0 or sb < 0:
     st.info("a or b is negative, so the signs of x₀ and y₀ were adjusted.")
 
-st.subheader("Particular solution")
+st.write("Thus, we have the particular solution:")
 st.latex(rf"x_0 = {x0}, \quad y_0 = {y0}")
 
 st.subheader("General solution")
